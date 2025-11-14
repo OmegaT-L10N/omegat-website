@@ -1,0 +1,76 @@
+name: Sync English i18n from upstream
+
+on:
+  schedule:
+    # Every Saturday at 03:00 UTC
+    - cron: '0 3 * * 6'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: Optional reason for manual run
+        required: false
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sync-i18n-en
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: omegat-org/omegat-website
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target repository (master)
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Set up Git user
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "l10n-github-actions@noreply.omegat.org"
+
+      - name: Fetch upstream repository (shallow)
+        run: |
+          git clone --depth=1 https://github.com/${{ env.UPSTREAM_REPO }}.git _upstream
+
+      - name: Replace local English i18n with upstream version
+        run: |
+          set -e
+          mkdir -p _i18n
+          # Remove only the English subtree and the English YAML to reflect deletions upstream
+          rm -rf _i18n/en || true
+          rm -f _i18n/en.yml || true
+          # Copy from upstream
+          cp -r _upstream/_i18n/en _i18n/
+          cp _upstream/_i18n/en.yml _i18n/en.yml
+
+      - name: Stage changes
+        run: |
+          git add _i18n/en _i18n/en.yml
+
+      - name: Check for differences
+        id: diff
+        run: |
+          if git diff --staged --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit changes
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          ts="$(date -u +'%Y-%m-%d')"
+          git commit -m "Sync i18n(en) from upstream ${UPSTREAM_REPO} on ${ts}"
+
+      - name: Push to master
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git push origin HEAD:master
